@@ -3293,6 +3293,7 @@ static char *get_cpuset(const char *cg)
 }
 
 bool cpu_in_cpuset(int cpu, const char *cpuset);
+unsigned int cpus_in_cpuset(const char *cpuset);
 
 static bool cpuline_in_cpuset(const char *line, const char *cpuset)
 {
@@ -3403,8 +3404,10 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	char *cpuset = NULL;
 	char *line = NULL;
 	size_t linelen = 0, total_len = 0, rv = 0;
-	bool am_printing = false, firstline = true, is_s390x = false;
+	bool am_printing = false, firstline = true;
+	bool is_s390x = false, is_sw = false;
 	int curcpu = -1, cpu, max_cpus = 0;
+	unsigned int online_cpus = 0;
 	bool use_view;
 	char *cache = d->buf;
 	size_t cache_size = d->buflen;
@@ -3446,10 +3449,12 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 		ssize_t l;
 		if (firstline) {
 			firstline = false;
+			am_printing = true;
 			if (strstr(line, "IBM/S390") != NULL) {
 				is_s390x = true;
-				am_printing = true;
 				continue;
+			} else if (strstr(line, "sw") != NULL) {
+				is_sw = true;
 			}
 		}
 		if (strncmp(line, "# processors:", 12) == 0)
@@ -3503,7 +3508,24 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			total_len += l;
 			continue;
 
+		} else if (is_sw && sscanf(line, "cpus detected\t\t: %d", &cpu) == 1) {
+			online_cpus = cpus_in_cpuset(cpuset);
+			l = snprintf(cache, cache_size, \
+					"cpus detected\t\t: %u\n", online_cpus);
+			cache += l;
+			cache_size -= l;
+			total_len += l;
+			continue;
+		} else if (is_sw && sscanf(line, "cpus active\t\t: %d", &cpu) == 1) {
+			online_cpus = cpus_in_cpuset(cpuset);
+			l = snprintf(cache, cache_size, \
+					"cpus detected\t\t: %u\n", online_cpus);
+			cache += l;
+			cache_size -= l;
+			total_len += l;
+			continue;
 		}
+
 		if (am_printing) {
 			l = snprintf(cache, cache_size, "%s", line);
 			if (l < 0) {
