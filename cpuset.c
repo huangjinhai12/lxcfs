@@ -43,3 +43,24 @@ bool cpu_in_cpuset(int cpu, const char *cpuset)
 	return false;
 }
 
+/*
+ * cpusets are in format "1,2-3,4"
+ * calculate the total cpu number of cpuset
+ */
+unsigned int cpus_in_cpuset(const char *cpuset)
+{
+	const char *c = NULL;
+	unsigned int cpus = 0;
+	int a, b, retval;
+
+	for (c = cpuset; c != NULL; c = cpuset_nexttok(c)) {
+		retval = cpuset_getrange(c, &a, &b);
+		if (retval == 1) {
+			cpus += 1;
+		} else if (retval == 2) {
+			cpus += (b + 1 - a);
+		}
+	}
+
+	return cpus;
+}
