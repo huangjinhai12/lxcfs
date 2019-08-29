@@ -1,0 +1,42 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+
+include /usr/share/dpkg/vendor.mk
+
+ifeq ($(DEB_VENDOR),Ubuntu)
+	LXCFS_DEPENDS="systemd | cgroup-lite | cgroupfs-mount"
+else
+	LXCFS_DEPENDS="systemd | cgroupfs-mount"
+endif
+
+DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
+
+# Uncomment this to turn on verbose mode.
+#export DH_VERBOSE=1
+
+%:
+	dh $@ --with autoreconf --with systemd
+
+override_dh_auto_install:
+	dh_auto_install
+	find debian/lxcfs -type f -name '*.la' -delete
+
+override_dh_installinit:
+	dh_installinit -p lxcfs --no-stop-on-upgrade
+
+override_dh_installsystemd:
+	dh_installsystemd -p lxcfs --no-stop-on-upgrade lxcfs.service
+
+override_dh_autoreconf:
+	[ -e m4 ] || mkdir m4
+	dh_autoreconf
+
+override_dh_gencontrol:
+	dh_gencontrol -- -Vlxcfs:Depends=$(LXCFS_DEPENDS)
+
+clean:
+	dh_autoreconf_clean
+	dh_clean
