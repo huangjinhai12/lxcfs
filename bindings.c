@@ -3631,15 +3631,15 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && memswlimit > 0 && opts && opts->swap_off == false) {
 			sscanf(line+sizeof("SwapTotal:")-1, "%lu", &hostswtotal);
-			if (hostswtotal < memswlimit)
-				memswlimit = hostswtotal;
-			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", memswlimit);
+			if (hostswtotal < memswlimit - memlimit)
+				memswlimit = hostswtotal + memlimit;;
+			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", memswlimit - memlimit);
 			printme = lbuf;
 		} else if (startswith(line, "SwapTotal:") && opts && opts->swap_off == true) {
 			snprintf(lbuf, 100, "SwapTotal:      %8lu kB\n", 0UL);
 			printme = lbuf;
 		} else if (startswith(line, "SwapFree:") && memswlimit > 0 && memswusage > 0 && opts && opts->swap_off == false) {
-			unsigned long swaptotal = memswlimit,
+			unsigned long swaptotal = memswlimit - memlimit,
 					swapusage = memswusage - memusage,
 					swapfree = swapusage < swaptotal ? swaptotal - swapusage : 0;
 			snprintf(lbuf, 100, "SwapFree:       %8lu kB\n", swapfree);
