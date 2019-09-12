@@ -64,3 +64,23 @@ unsigned int cpus_in_cpuset(const char *cpuset)
 
 	return cpus;
 }
+
+/*
+ * get cpu number in cpuset
+ */
+int cpu_number_in_cpuset(const char *cpuset)
+{
+	const char *c;
+	int cpu_number = 0;
+
+	for (c = cpuset; c; c = cpuset_nexttok(c)) {
+		int a, b, ret;
+
+		ret = cpuset_getrange(c, &a, &b);
+		if (ret == 1)
+			cpu_number++;
+		else if (ret == 2)
+			cpu_number +=  a > b ? a - b + 1 : b - a + 1;
+	}
+	return cpu_number;
+}
