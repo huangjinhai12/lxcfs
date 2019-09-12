@@ -3750,7 +3750,6 @@ char *get_cpuset(const char *cg)
 }
 
 bool cpu_in_cpuset(int cpu, const char *cpuset);
-unsigned int cpus_in_cpuset(const char *cpuset);
 
 static bool cpuline_in_cpuset(const char *line, const char *cpuset)
 {
@@ -3995,7 +3994,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			continue;
 
 		} else if (is_sw && sscanf(line, "cpus detected\t\t: %d", &cpu) == 1) {
-			online_cpus = cpus_in_cpuset(cpuset);
+			online_cpus = cpu_number_in_cpuset(cpuset);
 			l = snprintf(cache, cache_size, \
 					"cpus detected\t\t: %u\n", online_cpus);
 			cache += l;
@@ -4003,7 +4002,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			total_len += l;
 			continue;
 		} else if (is_sw && sscanf(line, "cpus active\t\t: %d", &cpu) == 1) {
-			online_cpus = cpus_in_cpuset(cpuset);
+			online_cpus = cpu_number_in_cpuset(cpuset);
 			l = snprintf(cache, cache_size, \
 					"cpus detected\t\t: %u\n", online_cpus);
 			cache += l;
