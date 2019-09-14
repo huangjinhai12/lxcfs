@@ -3992,19 +3992,11 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			cache_size -= l;
 			total_len += l;
 			continue;
-
-		} else if (is_sw && sscanf(line, "cpus detected\t\t: %d", &cpu) == 1) {
-			online_cpus = cpu_number_in_cpuset(cpuset);
-			l = snprintf(cache, cache_size, \
-					"cpus detected\t\t: %u\n", online_cpus);
-			cache += l;
-			cache_size -= l;
-			total_len += l;
-			continue;
 		} else if (is_sw && sscanf(line, "cpus active\t\t: %d", &cpu) == 1) {
 			online_cpus = cpu_number_in_cpuset(cpuset);
+			max_cpus = online_cpus > max_cpus ? max_cpus : online_cpus;
 			l = snprintf(cache, cache_size, \
-					"cpus detected\t\t: %u\n", online_cpus);
+					"cpus active\t\t: %u\n", max_cpus);
 			cache += l;
 			cache_size -= l;
 			total_len += l;
