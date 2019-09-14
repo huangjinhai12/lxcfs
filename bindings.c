@@ -3888,6 +3888,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 	char *cg;
 	char *cpuset = NULL;
 	char *line = NULL;
+	char cpumask[512] = {0};
 	size_t linelen = 0, total_len = 0, rv = 0;
 	bool am_printing = false, firstline = true;
 	bool is_s390x = false, is_sw = false;
@@ -3997,6 +3998,38 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 			max_cpus = online_cpus > max_cpus ? max_cpus : online_cpus;
 			l = snprintf(cache, cache_size, \
 					"cpus active\t\t: %u\n", max_cpus);
+			cache += l;
+			cache_size -= l;
+			total_len += l;
+			continue;
+		} else if (is_sw && sscanf(line, "cpu active mask\t\t: %s", cpumask) == 1) {
+			size_t len = strlen(cpumask);
+			size_t idx = len - (max_cpus+3)/4;
+
+			switch (max_cpus%5) {
+			case 0:
+				cpumask[idx] = '0';
+				break;
+			case 1:
+				cpumask[idx] = '1';
+				break;
+			case 2:
+				cpumask[idx] = '3';
+				break;
+			case 3:
+				cpumask[idx] = '7';
+				break;
+			case 4:
+				cpumask[idx] = 'f';
+				break;
+			}
+
+			for (size_t i = idx-1; i >= 0 && cpumask[i] != '0'; i--)
+				cpumask[i] = '0';
+
+			l = snprintf(cache, cache_size,
+					"cpu active mask\t\t: %s\n", cpumask);
+
 			cache += l;
 			cache_size -= l;
 			total_len += l;
