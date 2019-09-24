@@ -15,4 +15,9 @@ struct water_mark {
 	unsigned long high;
 };
 
+struct dynmem_args {
+	char *mc_mount;
+	char *base_path;
+};
+
 #endif /* __LXCFS_DYNAMIC_MEMORY_H */

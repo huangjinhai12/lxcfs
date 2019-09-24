@@ -71,26 +71,26 @@ static void users_unlock(void)
 }
 
 static pthread_t dynmem_tid;
-static char *mc_mount;
+static struct dynmem_args dynmem_arg;
 
 static int start_dynmem(bool use_dynmem) {
 	char *error;
-	pthread_t (*dynmem_daemon)(char *);
+	pthread_t (*dynmem_daemon)(void *);
 	int retval = 0;
 
-	if (!use_dynmem || mc_mount == NULL)
+	if (!use_dynmem || dynmem_arg.mc_mount == NULL)
 		goto out;
 
 	dlerror();
 
-	dynmem_daemon = (pthread_t (*)(char *)) dlsym(dlopen_handle, "dynmem_daemon");
+	dynmem_daemon = (pthread_t (*)(void *)) dlsym(dlopen_handle, "dynmem_daemon");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("dynmem_daemon fails: %s\n", error);
 		retval = -1;
 		goto out;
 	}
-	dynmem_tid = dynmem_daemon(mc_mount);
+	dynmem_tid = dynmem_daemon(&dynmem_arg);
 	if (dynmem_tid == 0)
 		retval = -1;
 
@@ -1153,7 +1153,7 @@ int main(int argc, char *argv[])
 	}
 	if (swallow_option(&argc, argv, "-m", &v)) {
 		use_dynmem = true;
-		mc_mount = v;
+		dynmem_arg.mc_mount = v;
 	}
 	if (swallow_arg(&argc, argv, "-u")) {
 		opts->swap_off = true;
@@ -1202,6 +1202,7 @@ int main(int argc, char *argv[])
 		newargv[cnt++] = "allow_other,direct_io,entry_timeout=0.5,attr_timeout=0.5";
 	newargv[cnt++] = argv[1];
 	newargv[cnt++] = NULL;
+	dynmem_arg.base_path = strdup(argv[1]);
 
 	if (!pidfile) {
 		pidfile_len = strlen(RUNTIME_PATH) + strlen("/lxcfs.pid") + 1;

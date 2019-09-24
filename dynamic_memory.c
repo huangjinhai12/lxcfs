@@ -87,7 +87,8 @@ static void increase_mem_limit(const char *cg, const unsigned long memlimit,
 }
 
 void *dynmem_task(void *arg) {
-	const char *mc_mount = mc_mount;
+	const char *mc_mount = ((struct dynmem_args *)arg)->mc_mount;
+	const char *base_path = ((struct dynmem_args *)arg)->base_path;
 	unsigned long memlimit, memusage;
 	struct dirent *direntp;
 	clock_t time1, time2;
