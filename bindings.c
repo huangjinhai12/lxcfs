@@ -749,7 +749,7 @@ static bool in_comma_list(const char *needle, const char *haystack)
  * referring to the controller mountpoint in the private lxcfs namespace in
  * @cfd.
  */
-static char *find_mounted_controller(const char *controller, int *cfd)
+char *find_mounted_controller(const char *controller, int *cfd)
 {
 	int i;
 
@@ -3542,6 +3542,31 @@ static unsigned long get_min_memlimit(const char *cgroup, const char *file)
 	};
 
 	return retlimit;
+}
+
+unsigned long get_mem_usage(const char *cgroup)
+{
+	return get_memlimit(cgroup, "memory.usage_in_bytes");
+}
+
+unsigned long get_mem_limit(const char *cgroup)
+{
+	return get_min_memlimit(cgroup, "memory.limit_in_bytes");
+}
+
+bool set_mem_limit(const char *cgroup, const unsigned long memlimit,
+					 unsigned long extra_mem)
+{
+	bool retval = true;
+	char buf[16];
+
+	if (extra_mem == 0)
+		goto out;
+
+	snprintf(buf, sizeof(buf)-1, "%lu", memlimit+extra_mem);
+	retval = cgfs_set_value("memory", cgroup, "memory.limit_in_bytes", buf);
+out:
+	return retval;
 }
 
 static int proc_meminfo_read(char *buf, size_t size, off_t offset,

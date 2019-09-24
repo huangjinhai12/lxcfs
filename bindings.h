@@ -1,6 +1,7 @@
 #ifndef __LXCFS_BINDINGS_H
 #define __LXCFS_BINDINGS_H
 
+#include <fuse.h>
 #include "macro.h"
 #include "sysfs_fuse.h"
 
@@ -86,5 +87,11 @@ extern bool use_cpuview(const char *cg);
 extern int max_cpu_count(const char *cg);
 extern void do_release_file_info(struct fuse_file_info *fi);
 extern int cpu_number_in_cpuset(const char *cpuset);
+
+extern char *find_mounted_controller(const char *controller, int *cfd);
+extern unsigned long get_mem_usage(const char *cgroup);
+extern unsigned long get_mem_limit(const char *cgroup);
+extern bool set_mem_limit(const char *cgroup, const unsigned long memlimit,
+						  unsigned long extra_mem);
 
 #endif /* __LXCFS_BINDINGS_H */
