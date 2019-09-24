@@ -31,6 +31,7 @@
 #include <linux/limits.h>
 
 #include "bindings.h"
+#include "dynamic_memory.h"
 #include "config.h" // for VERSION
 
 void *dlopen_handle;
@@ -67,6 +68,57 @@ static void users_lock(void)
 static void users_unlock(void)
 {
 	unlock_mutex(&user_count_mutex);
+}
+
+static pthread_t dynmem_tid = 0;
+
+static int start_dynmem(bool use_dynmem) {
+	char *error;
+	pthread_t (*dynmem_daemon)(void);
+	int retval = 0;
+
+	if (!use_dynmem)
+		goto out;
+
+	dlerror();
+
+	dynmem_daemon = (pthread_t (*)(void)) dlsym(dlopen_handle, "dynmem_daemon");
+	error = dlerror();
+	if (error != NULL) {
+		lxcfs_error("dynmem_daemon fails: %s\n", error);
+		retval = -1;
+		goto out;
+	}
+	dynmem_tid = dynmem_daemon();
+	if (dynmem_tid == 0)
+		retval = -1;
+
+out:
+	return retval;
+}
+
+static int stop_dynmem(bool use_dynmem) {
+	char *error;
+	int (*stop_dynmem_daemon)(pthread_t);
+	int retval = 0;
+
+	if (!use_dynmem || dynmem_tid == 0)
+		goto out;
+
+	stop_dynmem_daemon = (int (*)(pthread_t))
+						  dlsym(dlopen_handle, "stop_dynmem_daemon");
+	error = dlerror();
+	if (error != NULL) {
+		lxcfs_error("stop_dynmem_daemon error: %s\n", error);
+		retval = -1;
+		goto out;
+	}
+
+	retval = stop_dynmem_daemon(dynmem_tid);
+	/* not set dynmem_tid == 0 because of restarting task */
+
+out:
+	return retval;
 }
 
 static pthread_t loadavg_pid = 0;
@@ -120,6 +172,8 @@ static void do_reload(void)
 	if (loadavg_pid > 0)
 		stop_loadavg();
 
+	stop_dynmem(dynmem_tid > 0);
+
 	if (dlopen_handle) {
 		lxcfs_debug("%s\n", "Closing liblxcfs.so handle.");
 		dlclose(dlopen_handle);
@@ -147,6 +201,8 @@ static void do_reload(void)
 good:
 	if (loadavg_pid > 0)
 		start_loadavg();
+
+	start_dynmem(dynmem_tid > 0);
 
 	if (need_reload)
 		lxcfs_error("%s\n", "lxcfs: reloaded");
@@ -966,6 +1022,7 @@ static void usage()
 	fprintf(stderr, "lxcfs [-f|-d] -u -l -n [-p pidfile] mountpoint\n");
 	fprintf(stderr, "  -f running foreground by default; -d enable debug output \n");
 	fprintf(stderr, "  -l use loadavg \n");
+	fprintf(stderr, "  -m use dynamic memory \n");
 	fprintf(stderr, "  -u no swap \n");
 	fprintf(stderr, "  Default pidfile is %s/lxcfs.pid\n", RUNTIME_PATH);
 	fprintf(stderr, "lxcfs -h\n");
@@ -1068,7 +1125,7 @@ int main(int argc, char *argv[])
 	char *pidfile = NULL, *saveptr = NULL, *token = NULL, *v = NULL;
 	size_t pidfile_len;
 	bool debug = false, nonempty = false;
-	bool load_use = false;
+	bool load_use = false, use_dynmem = false;
 	/*
 	 * what we pass to fuse_main is:
 	 * argv[0] -s [-f|-d] -o allow_other,directio argv[1] NULL
@@ -1091,6 +1148,8 @@ int main(int argc, char *argv[])
 	if (swallow_arg(&argc, argv, "-l")) {
 		load_use = true;
 	}
+	if (swallow_arg(&argc, argv, "-m"))
+		use_dynmem = true;
 	if (swallow_arg(&argc, argv, "-u")) {
 		opts->swap_off = true;
 	}
@@ -1150,11 +1209,16 @@ int main(int argc, char *argv[])
 	if (load_use && start_loadavg() != 0)
 		goto out;
 
+	if (start_dynmem(use_dynmem) != 0)
+		goto loadavg_out;
+
 	if (!fuse_main(nargs, newargv, &lxcfs_ops, opts))
 		ret = EXIT_SUCCESS;
+
+	stop_dynmem(use_dynmem);
+loadavg_out:
 	if (load_use)
 		stop_loadavg();
-
 out:
 	if (dlopen_handle)
 		dlclose(dlopen_handle);
