@@ -8,6 +8,7 @@
 #ifndef __LXCFS_DYNAMIC_MEMORY_H
 #define __LXCFS_DYNAMIC_MEMORY_H
 
+/* memory water mark structure, unit is kbytes */
 struct water_mark {
 	unsigned long min;
 	unsigned long low;
