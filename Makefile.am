@@ -14,13 +14,15 @@ AM_CFLAGS += -DRUNTIME_PATH=\"$(RUNTIME_PATH)\"
 
 liblxcfs_la_SOURCES = bindings.c bindings.h \
 		      cpuset.c \
-		      sysfs_fuse.c sysfs_fuse.h
+		      sysfs_fuse.c sysfs_fuse.h \
+			  dynamic_memory.c dynamic_memory.h
 liblxcfs_la_CFLAGS = $(AM_CFLAGS)
 liblxcfs_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
 liblxcfstest_la_SOURCES = bindings.c bindings.h \
 			  cpuset.c \
-			  sysfs_fuse.c sysfs_fuse.h
+			  sysfs_fuse.c sysfs_fuse.h \
+			  dynamic_memory.c dynamic_memory.h
 liblxcfstest_la_CFLAGS = $(AM_CFLAGS) -DRELOADTEST
 liblxcfstest_la_LDFLAGS = $(AM_CFLAGS) -module -avoid-version -shared
 
