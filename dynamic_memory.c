@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <math.h>
 #include <time.h>
+#include <string.h>
 #include <errno.h>
 #include <sys/user.h> // define PAGE_SIZE
 #include <sys/sysinfo.h>
@@ -79,18 +80,24 @@ static bool is_increase_memlimit(const unsigned long memlimit,
 }
 
 void *dynmem_task(void *arg) {
+	const char *mc_mount = arg;
 	unsigned long memlimit, memusage, extra_mem;
 	struct dirent *direntp;
 	clock_t time1, time2;
 	char cg[512];
-	int cfd;
+	int cfd, fd;
 	DIR *dirp;
 
 	if (!find_mounted_controller("memory", &cfd)) {
 		lxcfs_error("find_mounted_controller('memory') fails!\n");
 		goto out;
 	}
-	if ((dirp = fdopendir(cfd)) == NULL) {
+
+	if ((fd = openat(cfd, mc_mount, O_RDONLY)) < 0) {
+		lxcfs_error("openat('%s') fails.\n", mc_mount);
+		goto out;
+	}
+	if ((dirp = fdopendir(fd)) == NULL) {
 		lxcfs_error("'fdopendir fails!\n");
 		goto out;
 	}
@@ -98,18 +105,30 @@ void *dynmem_task(void *arg) {
 	while (!stop_dynmem) {
 		time1 = clock();
 
-		while ((direntp = readdir(dirp)) != NULL) {
-			snprintf(cg, sizeof(cg)-1, "/docker/%s", direntp->d_name);
-			memlimit = get_mem_limit(cg);
-			memusage = get_mem_usage(cg);
+		lxcfs_debug("start dynamic memory task.\n");
+		seekdir(dirp, 0);
 
-			lxcfs_debug("'%s': memlimit=%lu memusage=%lu\n",
+		/* traversal directory that length is 64 which is docker created */
+		while ((direntp = readdir(dirp)) != NULL) {
+			if (!(direntp->d_type == DT_DIR)
+					|| !(strlen(direntp->d_name) == 64))
+				continue;
+
+			snprintf(cg, sizeof(cg)-1, "/%s/%s", mc_mount, direntp->d_name);
+
+			/* the direcity may be not used by container */
+			if (((memlimit = get_mem_limit(cg)) == -1)
+				|| ((memusage = get_mem_usage(cg)) == -1))
+				continue;
+
+			lxcfs_debug("  '%s': memlimit=%lu memusage=%lu\n",
 						cg, memlimit, memusage);
+
 			if (is_increase_memlimit(memlimit, memusage)) {
 				extra_mem = extra_mem_limit(memlimit, memusage);
-				lxcfs_debug("increase memory to %lu\n", extra_mem);
+				lxcfs_debug("    increase memory to %lu\n", extra_mem);
 				if (!set_mem_limit(cg, memlimit, extra_mem))
-					lxcfs_error("set_mem_limit('%s', '%lu', '%lu') fails!\n",
+					lxcfs_error("    set_mem_limit('%s', '%lu', '%lu') fails!\n",
 								cg, memlimit, extra_mem);
 			}
 		}
@@ -141,7 +160,7 @@ out:
 	return retval;
 }
 
-pthread_t dynmem_daemon(void) {
+pthread_t dynmem_daemon(char *mc_mount) {
 	int retval;
 	pthread_t tid = 0;
 
@@ -155,7 +174,7 @@ pthread_t dynmem_daemon(void) {
 	if (detect_mem_watermark() != 0)
 		goto out;
 
-	retval = pthread_create(&tid, NULL, dynmem_task, NULL);
+	retval = pthread_create(&tid, NULL, dynmem_task, mc_mount);
 	if (retval != 0)
 		lxcfs_error("Create pthread fails in 'dymmem_task'!\n");
 

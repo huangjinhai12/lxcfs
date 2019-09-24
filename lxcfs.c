@@ -70,28 +70,31 @@ static void users_unlock(void)
 	unlock_mutex(&user_count_mutex);
 }
 
-static pthread_t dynmem_tid = 0;
+static pthread_t dynmem_tid;
+static char *mc_mount;
 
 static int start_dynmem(bool use_dynmem) {
 	char *error;
-	pthread_t (*dynmem_daemon)(void);
+	pthread_t (*dynmem_daemon)(char *);
 	int retval = 0;
 
-	if (!use_dynmem)
+	if (!use_dynmem || mc_mount == NULL)
 		goto out;
 
 	dlerror();
 
-	dynmem_daemon = (pthread_t (*)(void)) dlsym(dlopen_handle, "dynmem_daemon");
+	dynmem_daemon = (pthread_t (*)(char *)) dlsym(dlopen_handle, "dynmem_daemon");
 	error = dlerror();
 	if (error != NULL) {
 		lxcfs_error("dynmem_daemon fails: %s\n", error);
 		retval = -1;
 		goto out;
 	}
-	dynmem_tid = dynmem_daemon();
+	dynmem_tid = dynmem_daemon(mc_mount);
 	if (dynmem_tid == 0)
 		retval = -1;
+
+	lxcfs_debug("start dynnamic memory task thread.\n");
 
 out:
 	return retval;
@@ -1019,10 +1022,10 @@ static void usage()
 {
 	fprintf(stderr, "Usage:\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "lxcfs [-f|-d] -u -l -n [-p pidfile] mountpoint\n");
+	fprintf(stderr, "lxcfs [-f|-d] -u -l [-m <memory controller mount point>] -n [-p pidfile] mountpoint\n");
 	fprintf(stderr, "  -f running foreground by default; -d enable debug output \n");
 	fprintf(stderr, "  -l use loadavg \n");
-	fprintf(stderr, "  -m use dynamic memory \n");
+	fprintf(stderr, "  -m <memory controller mount point> use dynamic memory \n");
 	fprintf(stderr, "  -u no swap \n");
 	fprintf(stderr, "  Default pidfile is %s/lxcfs.pid\n", RUNTIME_PATH);
 	fprintf(stderr, "lxcfs -h\n");
@@ -1148,8 +1151,10 @@ int main(int argc, char *argv[])
 	if (swallow_arg(&argc, argv, "-l")) {
 		load_use = true;
 	}
-	if (swallow_arg(&argc, argv, "-m"))
+	if (swallow_option(&argc, argv, "-m", &v)) {
 		use_dynmem = true;
+		mc_mount = v;
+	}
 	if (swallow_arg(&argc, argv, "-u")) {
 		opts->swap_off = true;
 	}
