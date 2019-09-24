@@ -33,11 +33,11 @@ static struct water_mark phy_water_mark;
 
 /*
  * calculate the memory water mark, unit is page
- *   @mark: memory water mark
- *   @total: memory size, unit is byte
+ *   @mark: memory water mark, unit kbytes
+ *   @total: memory size, unit is kbyte
  */
 static void cal_mem_watermark(struct water_mark *mark, unsigned long total) {
-	mark->min = 4 * (unsigned long)sqrtf((float)total) / PAGE_SIZE;
+	mark->min = (4 * (unsigned long)sqrtf((float)total));
 	mark->low = mark->min * 5/4;
 	mark->high = mark->low * 3/2;
 }
@@ -50,38 +50,45 @@ static void cal_mem_watermark(struct water_mark *mark, unsigned long total) {
 static unsigned long extra_mem_limit(unsigned long memlimit,
 									 unsigned long memusage) {
 	struct sysinfo info;
-	unsigned long avail_pages;
-	unsigned long extra_mem = 0;
+	unsigned long extra_mem_bytes = 0;
 
 	if (sysinfo(&info) != 0) {
 		lxcfs_error("sysinfo fails!\n");
 		goto out;
 	}
 
-	avail_pages = info.freeram / PAGE_SIZE;
 	/* free memory is low, don't alloc extra memory for container */
-	if (avail_pages <= phy_water_mark.low)
+	if (info.freeram/1024 <= phy_water_mark.low)
 		goto out;
 
 	// TODO
 out:
-	return ((unsigned long)extra_mem/(8*1024)) * (8*1024);
+	return ((unsigned long)extra_mem_bytes/(8*1024)) * (8*1024);
 }
 
-static bool is_increase_memlimit(const unsigned long memlimit,
-								 const unsigned long memusage) {
+static void increase_mem_limit(const char *cg, const unsigned long memlimit,
+							   const unsigned long memusage) {
 	struct water_mark task_water_mark;
-	unsigned long used_pages;
+	unsigned long free_kbytes, extra_mem_bytes;
 
-	used_pages = memusage / PAGE_SIZE;
-	cal_mem_watermark(&task_water_mark, memlimit);
+	free_kbytes = (memlimit - memusage) / 1024;
+	cal_mem_watermark(&task_water_mark, memlimit/1024);
 
-	return used_pages > task_water_mark.high;
+	lxcfs_debug("task_water_mark: min=%lu, low=%lu, high=%lu.\n",
+				task_water_mark.min, task_water_mark.low, task_water_mark.high);
+	lxcfs_debug("free_kbytes=%lu\n", free_kbytes);
+
+	if ((free_kbytes <= task_water_mark.low)
+			&& (extra_mem_bytes = extra_mem_limit(memlimit, memusage)) > 0) {
+		if (!set_mem_limit(cg, memlimit, extra_mem_bytes))
+			lxcfs_error("set_mem_limit('%s', '%lu', '%lu') fails!\n",
+						cg, memlimit, extra_mem_bytes);
+	}
 }
 
 void *dynmem_task(void *arg) {
-	const char *mc_mount = arg;
-	unsigned long memlimit, memusage, extra_mem;
+	const char *mc_mount = mc_mount;
+	unsigned long memlimit, memusage;
 	struct dirent *direntp;
 	clock_t time1, time2;
 	char cg[512];
@@ -121,16 +128,10 @@ void *dynmem_task(void *arg) {
 				|| ((memusage = get_mem_usage(cg)) == -1))
 				continue;
 
-			lxcfs_debug("  '%s': memlimit=%lu memusage=%lu\n",
+			lxcfs_debug("'%s': memlimit=%lu memusage=%lu\n",
 						cg, memlimit, memusage);
 
-			if (is_increase_memlimit(memlimit, memusage)) {
-				extra_mem = extra_mem_limit(memlimit, memusage);
-				lxcfs_debug("    increase memory to %lu\n", extra_mem);
-				if (!set_mem_limit(cg, memlimit, extra_mem))
-					lxcfs_error("    set_mem_limit('%s', '%lu', '%lu') fails!\n",
-								cg, memlimit, extra_mem);
-			}
+			increase_mem_limit(cg, memlimit, memusage);
 		}
 
 		time2 = clock();
@@ -155,7 +156,7 @@ static int detect_mem_watermark(void) {
 		goto out;
 	}
 
-	cal_mem_watermark(&phy_water_mark, info.totalram);
+	cal_mem_watermark(&phy_water_mark, info.totalram/1024);
 out:
 	return retval;
 }
