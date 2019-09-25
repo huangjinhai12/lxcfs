@@ -9,6 +9,8 @@
 #include <sys/types.h>
 #include <dirent.h>
 #include <stdio.h>
+#include <signal.h>
+#include <stdlib.h>
 #include <stdbool.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -86,6 +88,67 @@ static void increase_mem_limit(const char *cg, const unsigned long memlimit,
 	}
 }
 
+static bool lxcfs_in_task(const char *lxcfs_mount, pid_t pid, bool *result)
+{
+	FILE *filp;
+	char fina[32], *line = NULL;
+	size_t len;
+	bool retval = false;
+
+	if (snprintf(fina, sizeof(fina), "/proc/%d/mounts", pid) >= sizeof(fina))
+		goto out;
+	if ((filp = fopen(fina, "r")) == NULL)
+		goto out;
+
+	while (getline(&line, &len, filp) != -1) {
+		if (strstr(line, lxcfs_mount) != NULL) {
+			*result = true;
+			break;
+		}
+	}
+
+	free(line);
+	fclose(filp);
+
+	if (kill(pid, 0) == 0)
+		retval = true;
+out:
+	return retval;
+}
+
+static bool is_active_lxcfs(const char *lxcfs_mount, const char *cg) {
+	bool retval = false, result;
+	pid_t pid;
+	int fd;
+	FILE *filp;
+
+	fd = get_tasks_fd("memory", cg);
+	if (fd < 0) {
+		lxcfs_error("get '%s/tasks' fd fails!\n", cg);
+		goto out;
+	}
+
+	if ((filp = fdopen(fd, "r")) == NULL) {
+		close(fd);
+		goto out;
+	}
+
+	while (!feof(filp)) {
+		if (fscanf(filp, "%d", &pid) != 1)
+			continue;
+
+		if (lxcfs_in_task(lxcfs_mount, pid, &result) && result == true) {
+			lxcfs_debug("%s\n", cg);
+			retval = true;
+			break;
+		}
+	}
+
+	fclose(filp);
+out:
+	return retval;
+}
+
 void *dynmem_task(void *arg) {
 	const char *mc_mount = ((struct dynmem_args *)arg)->mc_mount;
 	const char *base_path = ((struct dynmem_args *)arg)->base_path;
@@ -124,8 +187,10 @@ void *dynmem_task(void *arg) {
 
 			snprintf(cg, sizeof(cg)-1, "/%s/%s", mc_mount, direntp->d_name);
 
+			fprintf(stdout, "%s\n", cg);
 			/* the direcity may be not used by container */
-			if (((memlimit = get_mem_limit(cg)) == -1)
+			if (!is_active_lxcfs(base_path, cg)
+				|| ((memlimit = get_mem_limit(cg)) == -1)
 				|| ((memusage = get_mem_usage(cg)) == -1))
 				continue;
 

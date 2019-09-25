@@ -3554,6 +3554,27 @@ unsigned long get_mem_limit(const char *cgroup)
 	return get_min_memlimit(cgroup, "memory.limit_in_bytes");
 }
 
+int get_tasks_fd(const char *controller, const char *cgroup)
+{
+	char *tmpc, *fnam;
+	int cfd, size, fd = -1;
+	size_t len;
+
+	tmpc = find_mounted_controller(controller, &cfd);
+	if (tmpc == NULL)
+		goto out;
+
+	len = strlen(cgroup) + 8;
+	fnam = alloca(len);
+	size = snprintf(fnam, len, "%s%s/tasks", *cgroup == '/' ? "." : "", cgroup);
+	if (size < 0 || size >= len)
+		goto out;
+
+	fd = openat(cfd, fnam, O_RDONLY);
+out:
+	return fd;
+}
+
 bool set_mem_limit(const char *cgroup, const unsigned long memlimit,
 					 unsigned long extra_mem)
 {

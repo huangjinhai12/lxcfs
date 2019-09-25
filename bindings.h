@@ -93,5 +93,6 @@ extern unsigned long get_mem_usage(const char *cgroup);
 extern unsigned long get_mem_limit(const char *cgroup);
 extern bool set_mem_limit(const char *cgroup, const unsigned long memlimit,
 						  unsigned long extra_mem);
+extern int get_tasks_fd(const char *controller, const char *cgroup);
 
 #endif /* __LXCFS_BINDINGS_H */
