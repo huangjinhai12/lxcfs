@@ -76,10 +76,6 @@ static void increase_mem_limit(const char *cg, const unsigned long memlimit,
 	free_kbytes = (memlimit - memusage) / 1024;
 	cal_mem_watermark(&task_water_mark, memlimit/1024);
 
-	lxcfs_debug("task_water_mark: min=%lu, low=%lu, high=%lu.\n",
-				task_water_mark.min, task_water_mark.low, task_water_mark.high);
-	lxcfs_debug("free_kbytes=%lu\n", free_kbytes);
-
 	if ((free_kbytes <= task_water_mark.low)
 			&& (extra_mem_bytes = extra_mem_limit(memlimit, memusage)) > 0) {
 		if (!set_mem_limit(cg, memlimit, extra_mem_bytes))
@@ -138,7 +134,6 @@ static bool is_active_lxcfs(const char *lxcfs_mount, const char *cg) {
 			continue;
 
 		if (lxcfs_in_task(lxcfs_mount, pid, &result) && result == true) {
-			lxcfs_debug("%s\n", cg);
 			retval = true;
 			break;
 		}
@@ -176,7 +171,6 @@ void *dynmem_task(void *arg) {
 	while (!stop_dynmem) {
 		time1 = clock();
 
-		lxcfs_debug("start dynamic memory task.\n");
 		seekdir(dirp, 0);
 
 		/* traversal directory that length is 64 which is docker created */
