@@ -509,6 +509,12 @@ do {                                                                            
     HASH_ADD(hh,head,intfield,sizeof(int),add)
 #define HASH_REPLACE_INT(head,intfield,add,replaced)                             \
     HASH_REPLACE(hh,head,intfield,sizeof(int),add,replaced)
+#define HASH_FIND_LONG(head,findlong,out)	\
+    HASH_FIND(hh,head,findlong,sizeof(long int),out)
+#define HASH_ADD_LONG(head,longfield,add)	\
+    HASH_ADD(hh,head,longfield,sizeof(long int),add)
+#define HASH_REPLACE_LONG(head,longfield,add,replaced)	\
+    HASH_REPLACE(hh,head,longfield,sizeof(long int),add,replaced)
 #define HASH_FIND_PTR(head,findptr,out)                                          \
     HASH_FIND(hh,head,findptr,sizeof(void *),out)
 #define HASH_ADD_PTR(head,ptrfield,add)                                          \
