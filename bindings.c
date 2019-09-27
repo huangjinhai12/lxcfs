@@ -3549,9 +3549,10 @@ unsigned long get_mem_usage(const char *cgroup)
 	return get_memlimit(cgroup, "memory.usage_in_bytes");
 }
 
-unsigned long get_mem_limit(const char *cgroup)
+unsigned long get_mem_limit(const char *cgroup, bool soft)
 {
-	return get_min_memlimit(cgroup, "memory.limit_in_bytes");
+	return get_min_memlimit(cgroup,
+				soft ? "memory.soft_limit_in_bytes" : "memory.limit_in_bytes");
 }
 
 int get_tasks_fd(const char *controller, const char *cgroup)
@@ -3575,19 +3576,17 @@ out:
 	return fd;
 }
 
-bool set_mem_limit(const char *cgroup, const unsigned long memlimit,
-					 unsigned long extra_mem)
+bool set_mem_limit(const char *cgroup, const char *file,
+				   const unsigned long memlimit)
 {
-	bool retval = true;
+	int len;
 	char buf[16];
 
-	if (extra_mem == 0)
-		goto out;
+	len = snprintf(buf, sizeof(buf), "%lu", memlimit);
+	if (len < 0 || len >= sizeof(buf))
+		return false;
 
-	snprintf(buf, sizeof(buf)-1, "%lu", memlimit+extra_mem);
-	retval = cgfs_set_value("memory", cgroup, "memory.limit_in_bytes", buf);
-out:
-	return retval;
+	return cgfs_set_value("memory", cgroup, file, buf);
 }
 
 static int proc_meminfo_read(char *buf, size_t size, off_t offset,

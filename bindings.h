@@ -90,9 +90,9 @@ extern int cpu_number_in_cpuset(const char *cpuset);
 
 extern char *find_mounted_controller(const char *controller, int *cfd);
 extern unsigned long get_mem_usage(const char *cgroup);
-extern unsigned long get_mem_limit(const char *cgroup);
-extern bool set_mem_limit(const char *cgroup, const unsigned long memlimit,
-						  unsigned long extra_mem);
+extern unsigned long get_mem_limit(const char *cgroup, bool soft);
+extern bool set_mem_limit(const char *cgroup, const char *file,
+						  const unsigned long memlimit);
 extern int get_tasks_fd(const char *controller, const char *cgroup);
 
 #endif /* __LXCFS_BINDINGS_H */
