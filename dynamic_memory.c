@@ -30,8 +30,8 @@
 #define FLUSH_TIME 3
 
 static bool stop_dynmem = false;
-
 static struct water_mark phy_water_mark;
+static struct hash_map *bucket = NULL;
 
 /*
  * calculate the memory water mark, unit is page
@@ -45,14 +45,18 @@ static void cal_mem_watermark(struct water_mark *mark, unsigned long total) {
 }
 
 /*
+ * all unit is byte
  * TODO:
  *  research why the increase size must be 1024*8*N?
  *   return 1024*8*extra_mem bytes because of cgroup memory controller
  */
-static unsigned long extra_mem_limit(unsigned long memlimit,
+static unsigned long next_mem_limit(struct hash_map *node,
+									 unsigned long memlimit,
 									 unsigned long memusage) {
 	struct sysinfo info;
-	unsigned long extra_mem_bytes = 0;
+	unsigned long int delta = 0, free_bytes;
+    unsigned long int next_mem = memlimit;
+	struct water_mark cg_mark;
 
 	if (sysinfo(&info) != 0) {
 		lxcfs_error("sysinfo fails!\n");
@@ -63,25 +67,57 @@ static unsigned long extra_mem_limit(unsigned long memlimit,
 	if (info.freeram/1024 <= phy_water_mark.low)
 		goto out;
 
-	// TODO
+	free_bytes = (memlimit - memusage) / 1024;
+	cal_mem_watermark(&cg_mark, memusage/1024);
+
+	if (free_bytes < cg_mark.low) {
+		delta = (node->value.hard_limit - memlimit) * 0.1;
+		if ((info.freeram-delta) >= phy_water_mark.min) {
+			delta = ((unsigned long)(delta/(8*1024))) * (8*1024);
+			next_mem += delta;
+		}
+	} else if (free_bytes > cg_mark.high) {
+		delta = (((unsigned long)((memlimit - memusage)*0.1))/(8*1024)) * (8*1024);
+		next_mem = memlimit - delta;
+		next_mem = next_mem < node->value.soft_limit ? \
+						node->value.soft_limit : next_mem;
+	}
+
+	lxcfs_debug("'%s' next_mem = %lu\n", node->value.cg, next_mem);
+
 out:
-	return ((unsigned long)extra_mem_bytes/(8*1024)) * (8*1024);
+	return next_mem;
 }
 
-static void increase_mem_limit(const char *cg, const unsigned long memlimit,
+static void increase_mem_limit(const char *cg, const long int key,
+							   const unsigned long mem_hardlimit,
+							   const unsigned long mem_softlimit,
 							   const unsigned long memusage) {
-	struct water_mark task_water_mark;
-	unsigned long free_kbytes, extra_mem_bytes;
+	unsigned long next_mem, memlimit;
+	struct hash_map *node;
 
-	free_kbytes = (memlimit - memusage) / 1024;
-	cal_mem_watermark(&task_water_mark, memlimit/1024);
+	memlimit = mem_hardlimit < mem_softlimit ? mem_hardlimit : mem_softlimit;
 
-	if ((free_kbytes <= task_water_mark.low)
-			&& (extra_mem_bytes = extra_mem_limit(memlimit, memusage)) > 0) {
-		if (!set_mem_limit(cg, memlimit, extra_mem_bytes))
-			lxcfs_error("set_mem_limit('%s', '%lu', '%lu') fails!\n",
-						cg, memlimit, extra_mem_bytes);
+	HASH_FIND_LONG(bucket, &key, node);
+	if (node == NULL) {
+		node = malloc(sizeof(struct hash_map));
+		node->id = key;
+		strcpy(node->value.cg, cg);
+		node->value.soft_limit = memlimit;
+		node->value.hard_limit = 2 * memlimit;
+		HASH_ADD_LONG(bucket, id, node);
+		if (!set_mem_limit(cg, "memory.soft_limit_in_bytes", memlimit)) {
+			lxcfs_error("set '%s' memory.soft_limit_in_bytes fails!\n", cg);
+			HASH_DEL(bucket, node);
+			free(node);
+			return;
+		}
 	}
+
+	next_mem = next_mem_limit(node, memlimit, memusage);
+	if (next_mem != mem_hardlimit && \
+			!set_mem_limit(cg, "memory.limit_in_bytes", next_mem))
+		lxcfs_error("set_mem_limit('%s') fails!\n", cg);
 }
 
 static bool lxcfs_in_task(const char *lxcfs_mount, pid_t pid, bool *result)
@@ -91,6 +127,7 @@ static bool lxcfs_in_task(const char *lxcfs_mount, pid_t pid, bool *result)
 	size_t len;
 	bool retval = false;
 
+	*result = false;
 	if (snprintf(fina, sizeof(fina), "/proc/%d/mounts", pid) >= sizeof(fina))
 		goto out;
 	if ((filp = fopen(fina, "r")) == NULL)
@@ -113,7 +150,7 @@ out:
 }
 
 static bool is_active_lxcfs(const char *lxcfs_mount, const char *cg) {
-	bool retval = false, result;
+	bool retval = false;
 	pid_t pid;
 	int fd;
 	FILE *filp;
@@ -133,65 +170,97 @@ static bool is_active_lxcfs(const char *lxcfs_mount, const char *cg) {
 		if (fscanf(filp, "%d", &pid) != 1)
 			continue;
 
-		if (lxcfs_in_task(lxcfs_mount, pid, &result) && result == true) {
-			retval = true;
+		if (lxcfs_in_task(lxcfs_mount, pid, &retval)) {
 			break;
 		}
 	}
+
+	lxcfs_v("'%s' enable lxcfs? '%s'\n", cg, retval ? "true" : "false");
 
 	fclose(filp);
 out:
 	return retval;
 }
 
+static void kick_off_unused_cg(void) {
+	struct hash_map *node, *tmp;
+	int fd;
+
+	lxcfs_v("there are %u node in bucket\n", HASH_COUNT(bucket));
+
+	HASH_ITER(hh, bucket, node, tmp) {
+
+		if ((fd = get_tasks_fd("memory", node->value.cg)) < 0) {
+			lxcfs_v("kick off '%s'\n", node->value.cg);
+			HASH_DEL(bucket, node);
+			free(node);
+		} else
+			close(fd);
+	}
+}
+
 void *dynmem_task(void *arg) {
 	const char *mc_mount = ((struct dynmem_args *)arg)->mc_mount;
 	const char *base_path = ((struct dynmem_args *)arg)->base_path;
-	unsigned long memlimit, memusage;
+	unsigned long mem_softlimit, mem_hardlimit, memusage;
 	struct dirent *direntp;
 	clock_t time1, time2;
-	char cg[512];
-	int cfd, fd;
-	DIR *dirp;
+	char cg[512], key_str[16];
+	long int key;
+	int cfd, fd, len;
+	int cycle = 0;
+	DIR *dirp = NULL;
 
 	if (!find_mounted_controller("memory", &cfd)) {
 		lxcfs_error("find_mounted_controller('memory') fails!\n");
 		goto out;
 	}
 
-	if ((fd = openat(cfd, mc_mount, O_RDONLY)) < 0) {
-		lxcfs_error("openat('%s') fails.\n", mc_mount);
-		goto out;
-	}
-	if ((dirp = fdopendir(fd)) == NULL) {
-		lxcfs_error("'fdopendir fails!\n");
-		goto out;
-	}
-
 	while (!stop_dynmem) {
 		time1 = clock();
 
-		seekdir(dirp, 0);
+		if (dirp == NULL && \
+				((fd = openat(cfd, mc_mount, O_RDONLY)) < 0
+					|| (dirp = fdopendir(fd)) == NULL)) {
+			lxcfs_v("openat('%s') fails.\n", mc_mount);
+		} else {
+			seekdir(dirp, 0);
 
-		/* traversal directory that length is 64 which is docker created */
-		while ((direntp = readdir(dirp)) != NULL) {
-			if (!(direntp->d_type == DT_DIR)
-					|| !(strlen(direntp->d_name) == 64))
-				continue;
+			/* traversal directory that length is 64 which is docker created */
+			while ((direntp = readdir(dirp)) != NULL) {
+				if (!(direntp->d_type == DT_DIR)
+						|| !(strlen(direntp->d_name) == 64))
+					continue;
 
-			snprintf(cg, sizeof(cg)-1, "/%s/%s", mc_mount, direntp->d_name);
+				len = snprintf(cg, sizeof(cg), "/%s/%s",
+							   mc_mount, direntp->d_name);
+				if (len < 0 || len > sizeof(cg)) {
+					lxcfs_error("filename '/%s/%s' is too long!\n",
+								mc_mount, direntp->d_name);
+					continue;
+				}
 
-			fprintf(stdout, "%s\n", cg);
-			/* the direcity may be not used by container */
-			if (!is_active_lxcfs(base_path, cg)
-				|| ((memlimit = get_mem_limit(cg)) == -1)
-				|| ((memusage = get_mem_usage(cg)) == -1))
-				continue;
+				/* the direcity may be not used by container */
+				if (!is_active_lxcfs(base_path, cg)
+					|| ((mem_hardlimit = get_mem_limit(cg, false)) == -1)
+					|| ((mem_softlimit = get_mem_limit(cg, true)) == -1)
+					|| ((memusage = get_mem_usage(cg)) == -1))
+					continue;
 
-			lxcfs_debug("'%s': memlimit=%lu memusage=%lu\n",
-						cg, memlimit, memusage);
+				lxcfs_debug("'%s': "
+							"mem_hardlimit=%lu mem_softlimit=%lu memusage=%lu\n",
+							cg, mem_hardlimit, mem_softlimit, memusage);
 
-			increase_mem_limit(cg, memlimit, memusage);
+				strncat(key_str, direntp->d_name, 12);
+				key = strtol(key_str, NULL, 16);
+
+				increase_mem_limit(cg, key,
+								   mem_hardlimit, mem_softlimit, memusage);
+			}
+
+			cycle = (cycle + 1) % 16;
+			if (cycle == 0)
+				kick_off_unused_cg();
 		}
 
 		time2 = clock();
