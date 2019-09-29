@@ -231,7 +231,6 @@ void *dynmem_task(void *arg) {
 		if ((fd = openat(cfd, mc_mount, O_RDONLY)) < 0
 					|| (dirp = fdopendir(fd)) == NULL) {
 			lxcfs_v("openat('%s') fails.\n", mc_mount);
-			continue;
 		} else {
 
 			/* traversal directory that length is 64 which is docker created */
