@@ -219,12 +219,11 @@ void *dynmem_task(void *arg) {
 	while (!stop_dynmem) {
 		time1 = clock();
 
-		if (dirp == NULL && \
-				((fd = openat(cfd, mc_mount, O_RDONLY)) < 0
-					|| (dirp = fdopendir(fd)) == NULL)) {
+		if ((fd = openat(cfd, mc_mount, O_RDONLY)) < 0
+					|| (dirp = fdopendir(fd)) == NULL) {
 			lxcfs_v("openat('%s') fails.\n", mc_mount);
+			continue;
 		} else {
-			seekdir(dirp, 0);
 
 			/* traversal directory that length is 64 which is docker created */
 			while ((direntp = readdir(dirp)) != NULL) {
@@ -263,13 +262,13 @@ void *dynmem_task(void *arg) {
 				kick_off_unused_cg();
 		}
 
+		while ((closedir(dirp) == -1) && (errno == EINTR))
+			continue;
+
 		time2 = clock();
 		usleep(FLUSH_TIME * 1000000 - \
 			   (int)((time2 - time1) * 1000000 / CLOCKS_PER_SEC));
 	}
-
-	while ((closedir(dirp) == -1) && (errno == EINTR))
-		continue;
 
 out:
 	return 0;
