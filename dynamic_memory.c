@@ -64,10 +64,8 @@ static unsigned long next_mem_limit(struct hash_map *node,
 		goto out;
 	}
 
-	free_bytes = hard_limit - memusage;
+	free_bytes = soft_limit - memusage;
 	cal_mem_watermark(&cg_mark, hard_limit);
-
-	lxcfs_debug("soft_limit=%lu next_mem=%lu\n", soft_limit, next_mem);
 
 	/* free memory is low, don't alloc extra memory for container */
 	if (sys_info.freeram <= phy_water_mark.low) {
@@ -108,7 +106,6 @@ static void increase_mem_limit(const char *cg, const long int key,
 
 	memlimit = min(mem_hardlimit, mem_softlimit);
 
-	lxcfs_debug("memlimit=%lu\n", memlimit);
 	HASH_FIND_LONG(bucket, &key, node);
 	if (node == NULL) {
 		node = malloc(sizeof(struct hash_map));
@@ -269,6 +266,8 @@ void *dynmem_task(void *arg) {
 							mem_softlimit, memusage);
 
 				strncat(key_str, direntp->d_name, 12);
+				// must add, I don't know why there is no '\0' in the end.
+				key_str[12] = '\0';
 				key = strtol(key_str, NULL, 16);
 
 				increase_mem_limit(cg, key, mem_swlimit,
