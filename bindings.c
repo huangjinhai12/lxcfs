@@ -3549,10 +3549,9 @@ unsigned long get_mem_usage(const char *cgroup)
 	return get_memlimit(cgroup, "memory.usage_in_bytes");
 }
 
-unsigned long get_mem_limit(const char *cgroup, bool soft)
+unsigned long get_mem_limit(const char *cgroup, const char *file)
 {
-	return get_min_memlimit(cgroup,
-				soft ? "memory.soft_limit_in_bytes" : "memory.limit_in_bytes");
+	return get_min_memlimit(cgroup, file);
 }
 
 int get_tasks_fd(const char *controller, const char *cgroup)
