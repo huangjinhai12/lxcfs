@@ -56,7 +56,7 @@ static unsigned long next_mem_limit(struct hash_map *node,
 									unsigned long memusage) {
 	unsigned long int delta = 0, free_bytes;
 	unsigned long int hard_limit = node->value.hard_limit;
-    unsigned long int next_mem = soft_limit;
+	unsigned long int next_mem = soft_limit;
 	struct water_mark cg_mark;
 
 	if (sysinfo(&sys_info) != 0) {
