@@ -71,16 +71,24 @@ static unsigned long next_mem_limit(struct hash_map *node,
 	cal_mem_watermark(&cg_mark, memusage/1024);
 
 	if (free_bytes < cg_mark.low) {
-		delta = (node->value.hard_limit - memlimit) * 0.1;
-		if ((info.freeram-delta) >= phy_water_mark.min) {
-			delta = ((unsigned long)(delta/(8*1024))) * (8*1024);
+		delta = (node->value.hard_limit - memlimit) / (1 << node->value.count);
+		delta = delta & 0xffffffffffff2000;
+		lxcfs_v("delta: %ld\n", delta);
+		if ((info.freeram-delta)/1024 >= phy_water_mark.min
+			&& delta >= MIN_MEM) {
 			next_mem += delta;
+			node->value.count += 1;
 		}
 	} else if (free_bytes > cg_mark.high) {
-		delta = (((unsigned long)((memlimit - memusage)*0.1))/(8*1024)) * (8*1024);
-		next_mem = memlimit - delta;
-		next_mem = next_mem < node->value.soft_limit ? \
-						node->value.soft_limit : next_mem;
+		delta = ((unsigned long)((memlimit - memusage) * 0.1)) & 0xffffffffffff2000;
+		delta = delta >= MIN_MEM ? delta : MIN_MEM;
+		if (delta > 0) {
+			next_mem = memlimit - delta;
+			next_mem = next_mem < node->value.soft_limit ? \
+							node->value.soft_limit : next_mem;
+			node->value.count -= 1;
+			node->value.count = node->value.count >= 1 ? node->value.count : 1;
+		}
 	}
 
 	lxcfs_debug("'%s' next_mem = %lu\n", node->value.cg, next_mem);
@@ -104,7 +112,9 @@ static void increase_mem_limit(const char *cg, const long int key,
 		node->id = key;
 		strcpy(node->value.cg, cg);
 		node->value.soft_limit = memlimit;
-		node->value.hard_limit = 2 * memlimit;
+		node->value.hard_limit = 4 * \
+						((memlimit + MIN_MEM-1) & 0xffffffffffff2000);
+		node->value.count = 1;
 		HASH_ADD_LONG(bucket, id, node);
 		if (!set_mem_limit(cg, "memory.soft_limit_in_bytes", memlimit)) {
 			lxcfs_error("set '%s' memory.soft_limit_in_bytes fails!\n", cg);
