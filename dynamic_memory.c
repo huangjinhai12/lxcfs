@@ -32,14 +32,15 @@
 static bool stop_dynmem = false;
 static struct water_mark phy_water_mark;
 static struct hash_map *bucket = NULL;
+static struct sysinfo sys_info;
 
 /*
  * calculate the memory water mark, unit is page
- *   @mark: memory water mark, unit kbytes
- *   @total: memory size, unit is kbyte
+ *   @mark: memory water mark, unit bytes
+ *   @total: memory size, unit is byte
  */
 static void cal_mem_watermark(struct water_mark *mark, unsigned long total) {
-	mark->min = (4 * (unsigned long)sqrtf((float)total));
+	mark->min = (4 * (unsigned long)sqrtf((float)total)) * 1024;
 	mark->low = mark->min * 5/4;
 	mark->high = mark->low * 3/2;
 }
@@ -51,43 +52,43 @@ static void cal_mem_watermark(struct water_mark *mark, unsigned long total) {
  *   return 1024*8*extra_mem bytes because of cgroup memory controller
  */
 static unsigned long next_mem_limit(struct hash_map *node,
-									 unsigned long memlimit,
-									 unsigned long memusage) {
-	struct sysinfo info;
+									unsigned long soft_limit,
+									unsigned long memusage) {
 	unsigned long int delta = 0, free_bytes;
-    unsigned long int next_mem = memlimit;
+	unsigned long int hard_limit = node->value.hard_limit;
+    unsigned long int next_mem = soft_limit;
 	struct water_mark cg_mark;
 
-	if (sysinfo(&info) != 0) {
+	if (sysinfo(&sys_info) != 0) {
 		lxcfs_error("sysinfo fails!\n");
 		goto out;
 	}
 
+	free_bytes = hard_limit - memusage;
+	cal_mem_watermark(&cg_mark, hard_limit);
+
+	lxcfs_debug("soft_limit=%lu next_mem=%lu\n", soft_limit, next_mem);
+
 	/* free memory is low, don't alloc extra memory for container */
-	if (info.freeram/1024 <= phy_water_mark.low)
-		goto out;
-
-	free_bytes = (memlimit - memusage) / 1024;
-	cal_mem_watermark(&cg_mark, memusage/1024);
-
-	if (free_bytes < cg_mark.low) {
-		delta = (node->value.hard_limit - memlimit) / (1 << node->value.count);
-		delta = delta & 0xffffffffffff2000;
-		lxcfs_v("delta: %ld\n", delta);
-		if ((info.freeram-delta)/1024 >= phy_water_mark.min
+	if (sys_info.freeram <= phy_water_mark.low) {
+		lxcfs_debug("1\n");
+		next_mem = node->value.orig_limit;
+	} else if (free_bytes < cg_mark.low) {
+		lxcfs_debug("2\n");
+		delta = ((unsigned long)((node->value.hard_limit - soft_limit) * 0.1)) \
+									& 0xffffffffffff2000;
+		if ((sys_info.freeram-delta) >= phy_water_mark.min
 			&& delta >= MIN_MEM) {
 			next_mem += delta;
-			node->value.count += 1;
 		}
-	} else if (free_bytes > cg_mark.high) {
-		delta = ((unsigned long)((memlimit - memusage) * 0.1)) & 0xffffffffffff2000;
-		delta = delta >= MIN_MEM ? delta : MIN_MEM;
+	} else if (free_bytes > cg_mark.high
+			   && soft_limit > node->value.soft_limit) {
+		lxcfs_debug("3\n");
+		delta = ((unsigned long)((hard_limit - memusage) * 0.1)) \
+									& 0xffffffffffff2000;
+		delta = min(delta, MIN_MEM);
 		if (delta > 0) {
-			next_mem = memlimit - delta;
-			next_mem = next_mem < node->value.soft_limit ? \
-							node->value.soft_limit : next_mem;
-			node->value.count -= 1;
-			node->value.count = node->value.count >= 1 ? node->value.count : 1;
+			next_mem = max(soft_limit-delta, node->value.orig_limit);
 		}
 	}
 
@@ -98,36 +99,39 @@ out:
 }
 
 static void increase_mem_limit(const char *cg, const long int key,
+							   const unsigned long mem_swlimit,
 							   const unsigned long mem_hardlimit,
 							   const unsigned long mem_softlimit,
 							   const unsigned long memusage) {
 	unsigned long next_mem, memlimit;
 	struct hash_map *node;
 
-	memlimit = mem_hardlimit < mem_softlimit ? mem_hardlimit : mem_softlimit;
+	memlimit = min(mem_hardlimit, mem_softlimit);
 
+	lxcfs_debug("memlimit=%lu\n", memlimit);
 	HASH_FIND_LONG(bucket, &key, node);
 	if (node == NULL) {
 		node = malloc(sizeof(struct hash_map));
 		node->id = key;
 		strcpy(node->value.cg, cg);
+		node->value.orig_limit = mem_hardlimit;
 		node->value.soft_limit = memlimit;
-		node->value.hard_limit = 4 * \
-						((memlimit + MIN_MEM-1) & 0xffffffffffff2000);
-		node->value.count = 1;
+		node->value.hard_limit = mem_swlimit;
 		HASH_ADD_LONG(bucket, id, node);
-		if (!set_mem_limit(cg, "memory.soft_limit_in_bytes", memlimit)) {
-			lxcfs_error("set '%s' memory.soft_limit_in_bytes fails!\n", cg);
+		if (!set_mem_limit(cg, "memory.limit_in_bytes",
+							  node->value.hard_limit)
+			|| !set_mem_limit(cg, "memory.soft_limit_in_bytes",
+							  node->value.soft_limit)) {
+			lxcfs_error("set '%s' initial memory limits fails!\n", cg);
 			HASH_DEL(bucket, node);
 			free(node);
-			return;
 		}
+	} else {
+		next_mem = next_mem_limit(node, memlimit, memusage);
+		if (next_mem != mem_softlimit && \
+				!set_mem_limit(cg, "memory.soft_limit_in_bytes", next_mem))
+			lxcfs_error("set_mem_limit('%s') fails!\n", cg);
 	}
-
-	next_mem = next_mem_limit(node, memlimit, memusage);
-	if (next_mem != mem_hardlimit && \
-			!set_mem_limit(cg, "memory.limit_in_bytes", next_mem))
-		lxcfs_error("set_mem_limit('%s') fails!\n", cg);
 }
 
 static bool lxcfs_in_task(const char *lxcfs_mount, pid_t pid, bool *result)
@@ -144,7 +148,7 @@ static bool lxcfs_in_task(const char *lxcfs_mount, pid_t pid, bool *result)
 		goto out;
 
 	while (getline(&line, &len, filp) != -1) {
-		if (strstr(line, lxcfs_mount) != NULL) {
+		if (strstr(line, "lxcfs") != NULL) {
 			*result = true;
 			break;
 		}
@@ -185,8 +189,6 @@ static bool is_active_lxcfs(const char *lxcfs_mount, const char *cg) {
 		}
 	}
 
-	lxcfs_v("'%s' enable lxcfs? '%s'\n", cg, retval ? "true" : "false");
-
 	fclose(filp);
 out:
 	return retval;
@@ -212,7 +214,7 @@ static void kick_off_unused_cg(void) {
 void *dynmem_task(void *arg) {
 	const char *mc_mount = ((struct dynmem_args *)arg)->mc_mount;
 	const char *base_path = ((struct dynmem_args *)arg)->base_path;
-	unsigned long mem_softlimit, mem_hardlimit, memusage;
+	unsigned long mem_softlimit, mem_hardlimit, mem_swlimit, memusage;
 	struct dirent *direntp;
 	clock_t time1, time2;
 	char cg[512], key_str[16];
@@ -251,19 +253,25 @@ void *dynmem_task(void *arg) {
 
 				/* the direcity may be not used by container */
 				if (!is_active_lxcfs(base_path, cg)
-					|| ((mem_hardlimit = get_mem_limit(cg, false)) == -1)
-					|| ((mem_softlimit = get_mem_limit(cg, true)) == -1)
+					|| ((mem_swlimit =
+						 get_mem_limit(cg, "memory.memsw.limit_in_bytes")) == -1)
+					|| ((mem_hardlimit =
+						 get_mem_limit(cg, "memory.limit_in_bytes")) == -1)
+					|| ((mem_softlimit =
+						 get_mem_limit(cg, "memory.soft_limit_in_bytes")) == -1)
 					|| ((memusage = get_mem_usage(cg)) == -1))
 					continue;
 
 				lxcfs_debug("'%s': "
-							"mem_hardlimit=%lu mem_softlimit=%lu memusage=%lu\n",
-							cg, mem_hardlimit, mem_softlimit, memusage);
+							"mem_swlimit=%lu mem_hardlimit=%lu "
+						    "mem_softlimit=%lu memusage=%lu\n",
+							cg, mem_swlimit, mem_hardlimit,
+							mem_softlimit, memusage);
 
 				strncat(key_str, direntp->d_name, 12);
 				key = strtol(key_str, NULL, 16);
 
-				increase_mem_limit(cg, key,
+				increase_mem_limit(cg, key, mem_swlimit,
 								   mem_hardlimit, mem_softlimit, memusage);
 			}
 
@@ -286,15 +294,14 @@ out:
 
 static int detect_mem_watermark(void) {
 	int retval;
-	struct sysinfo info;
 
-	retval = sysinfo(&info);
+	retval = sysinfo(&sys_info);
 	if (retval != 0) {
 		lxcfs_error("sysinfo fails!\n");
 		goto out;
 	}
 
-	cal_mem_watermark(&phy_water_mark, info.totalram/1024);
+	cal_mem_watermark(&phy_water_mark, sys_info.totalram);
 out:
 	return retval;
 }

@@ -32,14 +32,17 @@ struct hash_map {
 	long int id;
 	struct {
 		char cg[512];
+		unsigned long int orig_limit;
 		unsigned long int soft_limit;
 		unsigned long int hard_limit;
-		int count;
 	} value;
 	UT_hash_handle hh;
 };
 
 #define MEM_RATE 13
 #define MIN_MEM (1UL << 13)
+
+#define min(x, y)	(x) > (y) ? (y) : (x);
+#define max(x, y)	(x) > (y) ? (x) : (y);
 
 #endif /* __LXCFS_DYNAMIC_MEMORY_H */
