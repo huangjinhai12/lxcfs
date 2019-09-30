@@ -84,7 +84,7 @@ static unsigned long next_mem_limit(struct hash_map *node,
 		lxcfs_debug("3\n");
 		delta = ((unsigned long)((hard_limit - memusage) * 0.1)) \
 									& 0xffffffffffff2000;
-		delta = min(delta, MIN_MEM);
+		delta = max(delta, MIN_MEM);
 		if (delta > 0) {
 			next_mem = max(soft_limit-delta, node->value.orig_limit);
 		}
