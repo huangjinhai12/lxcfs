@@ -264,9 +264,8 @@ void *dynmem_task(void *arg) {
 							cg, mem_swlimit, mem_hardlimit,
 							mem_softlimit, memusage);
 
-				strncat(key_str, direntp->d_name, 12);
-				// must add, I don't know why there is no '\0' in the end.
-				key_str[12] = '\0';
+				strncpy(key_str, direntp->d_name, 12);
+				key_str[12] = '\0'; // must, see man page for details
 				key = strtol(key_str, NULL, 16);
 
 				increase_mem_limit(cg, key, mem_swlimit,
