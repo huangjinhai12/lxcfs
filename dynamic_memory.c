@@ -54,7 +54,7 @@ static void cal_mem_watermark(struct water_mark *mark, unsigned long total) {
 static unsigned long next_mem_limit(struct hash_map *node,
 									unsigned long soft_limit,
 									unsigned long memusage) {
-	unsigned long int delta = 0, free_bytes;
+	signed long int delta = 0, free_bytes;
 	unsigned long int hard_limit = node->value.hard_limit;
 	unsigned long int next_mem = soft_limit;
 	struct water_mark cg_mark;
