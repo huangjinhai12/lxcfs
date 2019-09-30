@@ -54,9 +54,9 @@ static void cal_mem_watermark(struct water_mark *mark, unsigned long total) {
 static unsigned long next_mem_limit(struct hash_map *node,
 									unsigned long soft_limit,
 									unsigned long memusage) {
-	signed long int delta = 0, free_bytes;
+	signed long int free_bytes;
 	unsigned long int hard_limit = node->value.hard_limit;
-	unsigned long int next_mem = soft_limit;
+	unsigned long int next_mem = soft_limit, delta = 0;
 	struct water_mark cg_mark;
 
 	if (sysinfo(&sys_info) != 0) {
@@ -65,13 +65,15 @@ static unsigned long next_mem_limit(struct hash_map *node,
 	}
 
 	free_bytes = soft_limit - memusage;
-	cal_mem_watermark(&cg_mark, hard_limit);
+	cal_mem_watermark(&cg_mark, soft_limit);
 
+    lxcfs_debug("free_bytes=%ld cg_mark.low=%lu\n", free_bytes, cg_mark.low);
 	/* free memory is low, don't alloc extra memory for container */
 	if (sys_info.freeram <= phy_water_mark.low) {
 		lxcfs_debug("1\n");
 		next_mem = node->value.orig_limit;
-	} else if (free_bytes < cg_mark.low) {
+	} else if (free_bytes < 0
+                || ((unsigned long)free_bytes) < cg_mark.low) {
 		lxcfs_debug("2\n");
 		delta = ((unsigned long)((node->value.hard_limit - soft_limit) * 0.1)) \
 									& 0xffffffffffff2000;
@@ -79,7 +81,7 @@ static unsigned long next_mem_limit(struct hash_map *node,
 			&& delta >= MIN_MEM) {
 			next_mem += delta;
 		}
-	} else if (free_bytes > cg_mark.high
+	} else if (free_bytes > 0 && ((unsigned long)free_bytes) > cg_mark.high
 			   && soft_limit > node->value.soft_limit) {
 		lxcfs_debug("3\n");
 		delta = ((unsigned long)((hard_limit - memusage) * 0.1)) \
