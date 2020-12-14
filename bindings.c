@@ -4071,7 +4071,7 @@ static int proc_cpuinfo_read(char *buf, size_t size, off_t offset,
 				cpumask[i] = '0';
 
 			l = snprintf(cache, cache_size,
-					"cpu active mask\t\t: %s", cpumask);
+					"cpu active mask\t\t: %s\n", cpumask);
 
 			cache += l;
 			cache_size -= l;
